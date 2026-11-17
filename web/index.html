@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Presenze TEKNOEDIL</title>
+<meta name="theme-color" content="#1f3a5f">
+<meta name="description" content="Registro presenze operai — uso interno Teknoedil S.r.l.">
+<meta name="robots" content="noindex, nofollow">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Presenze">
+<script>
+  // Tema prima del caricamento per evitare lampeggi
+  (function () {
+    var t = null;
+    try { t = localStorage.getItem("tema"); } catch (e) {}
+    if (!t) t = matchMedia("(prefers-color-scheme: dark)").matches ? "scuro" : "chiaro";
+    document.documentElement.dataset.tema = t;
+  })();
+</script>
+<link rel="stylesheet" href="style.css?v=1">
+</head>
+<body>
+
+<!-- Caricamento -->
+<div id="splash" class="splash"><div class="spinner"></div></div>
+
+<!-- Accesso -->
+<section id="login" class="login hidden">
+  <div class="login-box">
+    <img src="icons/icon-192.png" alt="" width="84" height="84">
+    <h1>Presenze <b>TEKNOEDIL</b></h1>
+    <p class="muted">Registro presenze operai — uso interno</p>
+    <button id="btn-login" class="btn primary big">Accedi con Google</button>
+    <p id="login-error" class="error"></p>
+    <button id="btn-logout-login" class="btn link hidden">Esci e cambia account</button>
+  </div>
+</section>
+
+<!-- App -->
+<div id="app" class="hidden">
+  <header class="topbar">
+    <div class="brand">Presenze <b>TEKNOEDIL</b></div>
+    <div class="top-right">
+      <span id="net" class="net hidden" title="Senza rete: i dati verranno sincronizzati al ritorno della connessione">offline</span>
+      <button id="btn-tema" class="icon-btn" title="Tema chiaro/scuro" aria-label="Tema">◐</button>
+    </div>
+  </header>
+
+  <div id="avvisi"></div>
+  <main id="view"></main>
+
+  <nav class="tabs" id="tabs">
+    <button data-v="giorno" class="on"><span class="ti">📋</span>Giorno</button>
+    <button data-v="calendario"><span class="ti">📅</span>Calendario</button>
+    <button data-v="riepilogo"><span class="ti">📊</span>Riepilogo</button>
+    <button data-v="operai" class="solo-ufficio"><span class="ti">👷</span>Operai</button>
+    <button data-v="impostazioni"><span class="ti">⚙️</span>Altro</button>
+  </nav>
+</div>
+
+<!-- Pannello modifica (bottom sheet) -->
+<div id="sheet-bg" class="sheet-bg hidden"></div>
+<div id="sheet" class="sheet hidden" role="dialog" aria-modal="true"></div>
+
+<div id="toast" class="toast hidden"></div>
+
+<script type="module" src="app.js?v=1"></script>
+</body>
+</html>

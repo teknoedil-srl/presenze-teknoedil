@@ -1,0 +1,73 @@
+rules_version = '2';
+// Regole Firestore di Presenze TEKNOEDIL.
+// Nel progetto pubblicato __ADMIN_EMAIL__ è sostituito con l'email dell'amministratore iniziale
+// (serve solo al primo avvio per creare l'elenco utenti). Nessun dato reale in questo file.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function autenticato() {
+      return request.auth != null && request.auth.token.email_verified == true;
+    }
+    function email() { return request.auth.token.email.lower(); }
+    function ruolo() {
+      return get(/databases/$(database)/documents/config/membri).data.ruoli.get(email(), '');
+    }
+    function membro() { return autenticato() && ruolo() in ['admin', 'ufficio', 'caposquadra']; }
+    function ufficio() { return autenticato() && ruolo() in ['admin', 'ufficio']; }
+    function admin() { return autenticato() && ruolo() == 'admin'; }
+
+    function meseChiuso(giorno) {
+      let p = giorno.split('-');
+      let ref = /databases/$(database)/documents/mesi/$(p[0] + '-' + p[1]);
+      return exists(ref) && get(ref).data.chiuso == true;
+    }
+    // Caposquadra: oggi, i 3 giorni precedenti e domani
+    function entroFinestra(giorno) {
+      let p = giorno.split('-');
+      let d = timestamp.date(int(p[0]), int(p[1]), int(p[2]));
+      return request.time < d + duration.value(4, 'd') && d < request.time + duration.value(1, 'd');
+    }
+
+    // Elenco utenti e ruoli
+    match /config/membri {
+      allow read: if membro();
+      allow create: if autenticato() && email() == '__ADMIN_EMAIL__'
+                    && request.resource.data.ruoli[email()] == 'admin';
+      allow update: if admin() && request.resource.data.ruoli.get(email(), '') == 'admin';
+    }
+    // Impostazioni generali (orario, festività locali, data ultimo backup)
+    match /config/impostazioni {
+      allow read: if membro();
+      allow write: if ufficio();
+    }
+    // Anagrafica operai
+    match /operai/{id} {
+      allow read: if membro();
+      allow create, update: if ufficio();
+      allow delete: if admin();
+    }
+    // Presenze: un documento per giorno (id AAAA-MM-GG)
+    match /presenze/{giorno} {
+      allow read: if membro();
+      allow create, update: if membro()
+        && giorno.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+        && !meseChiuso(giorno)
+        && (ufficio() || entroFinestra(giorno));
+      allow delete: if false;
+    }
+    // Chiusura mesi
+    match /mesi/{mese} {
+      allow read: if membro();
+      allow write: if ufficio() && mese.matches('^[0-9]{4}-[0-9]{2}$');
+    }
+    // Registro modifiche: si aggiunge soltanto, non si modifica né si cancella
+    match /log/{id} {
+      allow read: if ufficio();
+      allow create: if membro() && request.resource.data.by == email();
+      allow update, delete: if false;
+    }
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
