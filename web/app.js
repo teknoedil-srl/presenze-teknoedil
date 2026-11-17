@@ -129,6 +129,15 @@ function infoGiorno(iso, g = S.giorni[iso] || {}) {
   };
 }
 
+// Data (AAAA-MM-GG) da cui l'operaio è in anagrafica: prima di allora non risulta "da registrare"
+function inForzaDal(op) {
+  const c = op && op.creato;
+  return c && c.toDate ? isoDi(c.toDate()) : "0000-00-00";
+}
+function daRegistrare(op, iso, info) {
+  return info.presunto && op.attivo !== false && iso <= oggiISO() && iso >= inForzaDal(op);
+}
+
 function ruoloUfficio() { return S.ruolo === "admin" || S.ruolo === "ufficio"; }
 function meseChiuso(mk) { return !!(S.mesi[mk] && S.mesi[mk].chiuso); }
 function puoModificare(iso) {
@@ -220,7 +229,7 @@ onAuthStateChanged(auth, async (user) => {
   }
   S.unsub.membri = onSnapshot(ref, (snap) => {
     const d = snap.data() || {};
-    S.membri = { ruoli: d.ruoli || {}, nomi: d.nomi || {} };
+    S.membri = { ruoli: d.ruoli || {}, nomi: d.nomi || {}, creato: d.creato || null };
     S.ruolo = S.membri.ruoli[S.email] || "";
     if (!S.ruolo) { nonAutorizzato(); return; }
     if (!S.avviata) avviaApp(); else render();
@@ -301,7 +310,8 @@ function renderAvvisi() {
   let h = "";
   if (ruoloUfficio()) {
     const ub = S.imp.ultimoBackup && S.imp.ultimoBackup.toDate ? S.imp.ultimoBackup.toDate() : null;
-    const giorni = ub ? (Date.now() - ub.getTime()) / 864e5 : Infinity;
+    const rif = ub || (S.membri.creato && S.membri.creato.toDate ? S.membri.creato.toDate() : null);
+    const giorni = rif ? (Date.now() - rif.getTime()) / 864e5 : 0;
     if (giorni > 30 && !sessionStorage.getItem("noBackup")) {
       h += `<div class="avviso"><span>💾 ${ub ? "Ultimo backup più di 30 giorni fa." : "Nessun backup scaricato finora."} Il piano gratuito non fa copie automatiche.</span>
         <span class="row"><button class="btn small" data-a="backup">Scarica</button><button class="btn small link" data-a="nobackup">Dopo</button></span></div>`;
@@ -393,7 +403,7 @@ function vGiorno(el) {
         h += `<div class="barra-conferma"><button class="btn primary big" data-conferma>✓ Conferma giornata (${daConf} ${daConf === 1 ? "presente" : "presenti"} da registrare)</button></div>`;
       }
     }
-    h += `<p class="muted small" style="margin-top:14px">Le voci tratteggiate sono presenze previste non ancora registrate: toccando un operaio o "Conferma giornata" vengono salvate.</p>`;
+    if (daConf > 0) h += `<p class="muted small" style="margin-top:14px">Le voci tratteggiate sono presenze previste non ancora registrate: toccando un operaio o "Conferma giornata" vengono salvate.</p>`;
   }
   el.innerHTML = h;
   bindNav(el, "giorno");
@@ -643,7 +653,7 @@ function calcolaMese(mk) {
     let manca = false;
     for (const op of operai) {
       const r = righe[op.id];
-      if (!r) { if (info.presunto && op.attivo !== false && iso <= oggi) manca = true; continue; }
+      if (!r) { if (daRegistrare(op, iso, info)) manca = true; continue; }
       const t = tot[op.id];
       const ore = num(r.ore), str = num(r.str), oa = num(r.oreAss);
       t.ore += ore; t.str += str;
@@ -687,7 +697,7 @@ function vCalendario(el) {
         const r = (g.righe || {})[op.id];
         const st = statoRiga(r, info);
         let cls = "c-" + st.cls.split(" ")[0], txt = st.cod;
-        if (!r && info.presunto) { cls = "c-manca"; txt = iso <= oggi && op.attivo !== false ? "?" : ""; }
+        if (!r && info.presunto) { cls = "c-manca"; txt = daRegistrare(op, iso, info) ? "?" : ""; }
         h += `<td class="cell ${cls} ${info.festivo ? "festcol" : ""}" data-iso="${iso}">${esc(txt)}</td>`;
       }
       h += `<td><b>${fmt(tot[op.id].ore)}</b></td><td>${fmt(tot[op.id].str)}</td></tr>`;
@@ -705,7 +715,7 @@ function vCalendario(el) {
       const r = (g.righe || {})[op.id];
       const st = statoRiga(r, info);
       let txt = st.cod, col = "c-" + st.cls.split(" ")[0];
-      if (!r && info.presunto) { txt = iso <= oggi ? "?" : ""; col = "c-manca"; }
+      if (!r && info.presunto) { txt = daRegistrare(op, iso, info) ? "?" : ""; col = "c-manca"; }
       h += `<button class="g ${info.festivo ? "fest" : ""} ${iso === oggi ? "oggi" : ""}" data-iso="${iso}" title="${esc(info.festa || "")}">
         <span class="n">${d}</span><span class="v"><span class="${col}" style="color:var(--${col === "c-pres" ? "pres" : col === "c-ass" ? "ass" : col === "c-parz" ? "parz" : "muted"})">${esc(txt)}</span></span>${r && r.nota ? `<span class="small">📝</span>` : ""}</button>`;
     }
@@ -823,7 +833,7 @@ async function esportaExcel(mk, M) {
       const g = S.giorni[iso] || {};
       const info = infoGiorno(iso, g);
       const r = (g.righe || {})[op.id];
-      if (!r) return info.presunto && iso <= oggiISO() && op.attivo !== false ? "?" : "";
+      if (!r) return daRegistrare(op, iso, info) ? "?" : "";
       const st = statoRiga(r, info);
       const v = st.cod === "–" ? "" : st.cod;
       return /^\d+(,\d+)?$/.test(v) ? num(v) : v;
@@ -963,7 +973,7 @@ function vImpostazioni(el) {
   if (S.ruolo === "admin") {
     const salvaMembri = (ruoli, nomi, msg) => {
       const b = writeBatch(db);
-      b.set(doc(db, "config", "membri"), { ruoli, nomi, by: S.email, at: serverTimestamp() });
+      b.set(doc(db, "config", "membri"), { ruoli, nomi, creato: S.membri.creato || serverTimestamp(), by: S.email, at: serverTimestamp() });
       b.set(doc(collection(db, "log")), { giorno: oggiISO(), tipo: "utenti: " + msg, by: S.email, at: serverTimestamp() });
       commit(b, "Utenti aggiornati");
     };

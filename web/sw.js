@@ -1,7 +1,7 @@
 // Service worker: rende disponibile l'interfaccia anche senza rete.
 // I dati (Firestore) hanno una propria cache offline gestita dall'SDK.
-const CACHE = "presenze-v1";
-const FILES = ["./", "index.html", "style.css?v=1", "app.js?v=1", "manifest.webmanifest",
+const CACHE = "presenze-v2";
+const FILES = ["./", "index.html", "style.css?v=2", "app.js?v=2", "manifest.webmanifest",
   "icons/icon-192.png", "icons/icon-512.png", "vendor/xlsx.full.min.js"];
 
 self.addEventListener("install", (e) => {
