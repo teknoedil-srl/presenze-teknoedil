@@ -36,6 +36,7 @@ const CAUSALI = [
   { c: "MLT", n: "Maltempo", s: "MT" },
   { c: "ING", n: "Assenza ingiustificata", s: "AI" },
   { c: "ALT", n: "Altro", s: "A" },
+  { c: "NS", n: "Assente", s: "X" }, // assenza segnata con la casella, causale da specificare
 ];
 const CAUS = Object.fromEntries(CAUSALI.map((x) => [x.c, x]));
 const RUOLI = { admin: "Amministratore", ufficio: "Ufficio", caposquadra: "Caposquadra" };
@@ -390,9 +391,12 @@ function vGiorno(el) {
     for (const op of lista) {
       const r = righe[op.id];
       const st = statoRiga(r, info);
-      h += `<button class="voce ${op.attivo === false ? "inattivo" : ""}" data-op="${op.id}">
-        <span class="nome"><b>${esc(op.cognome)}</b> ${esc(op.nome)}<span class="q">${esc(op.qualifica || "")}${r && r.nota ? ` · 📝 ${esc(r.nota)}` : ""}</span></span>
-        <span class="stato ${st.cls}">${esc(st.txt)}</span></button>`;
+      const presente = r ? num(r.ore) + num(r.str) > 0 : info.presunto;
+      h += `<div class="voce ${op.attivo === false ? "inattivo" : ""}">
+        <label class="spunta" title="Presente"><input type="checkbox" data-chk="${op.id}" ${presente ? "checked" : ""} ${perm.ok ? "" : "disabled"} aria-label="Presente ${esc(nomeOp(op))}"></label>
+        <button class="nome-btn" data-op="${op.id}">
+          <span class="nome"><b>${esc(op.cognome)}</b> ${esc(op.nome)}<span class="q">${esc(op.qualifica || "")}${r && r.nota ? ` · 📝 ${esc(r.nota)}` : ""}</span></span>
+          <span class="stato ${st.cls}">${esc(st.txt)}</span></button></div>`;
     }
     h += `</div>`;
     if (perm.ok) {
@@ -404,13 +408,23 @@ function vGiorno(el) {
         h += `<div class="barra-conferma"><button class="btn primary big" data-conferma>✓ Conferma giornata (${daConf} ${daConf === 1 ? "presente" : "presenti"} da registrare)</button></div>`;
       }
     }
-    if (daConf > 0) h += `<p class="muted small" style="margin-top:14px">Le voci tratteggiate sono presenze previste non ancora registrate: toccando un operaio o "Conferma giornata" vengono salvate.</p>`;
+    h += `<p class="muted small" style="margin-top:14px">☑ casella = presente · tocca il nome per orario, straordinario, causale dell'assenza o nota.${daConf > 0 ? " Le voci tratteggiate sono presenze previste: si salvano al primo tocco o con \"Conferma giornata\"." : ""}</p>`;
   }
   el.innerHTML = h;
   bindNav(el, "giorno");
   el.querySelectorAll("[data-op]").forEach((b) => (b.onclick = () => {
     if (!perm.ok) { mostraDettaglio(iso, b.dataset.op); return; }
     apriEditor(iso, [b.dataset.op]);
+  }));
+  // Casella presenza: spuntata = presente con l'orario previsto, tolta = assente (causale da specificare toccando il nome)
+  el.querySelectorAll("[data-chk]").forEach((c) => (c.onchange = () => {
+    const id = c.dataset.chk;
+    const vecchia = righe[id] || {};
+    let nr;
+    if (c.checked) nr = { ore: info.base, str: 0, oreAss: 0, caus: null, nota: vecchia.nota || "" };
+    else if (info.presunto) nr = { ore: 0, str: 0, oreAss: info.base, caus: "NS", nota: vecchia.nota || "" };
+    else nr = null; // giorno non lavorativo: nessuna registrazione
+    salvaRighe(iso, { [id]: nr }, c.checked ? "Presente" : "Assente");
   }));
   const conf = $("[data-conferma]", el);
   if (conf) conf.onclick = () => salvaRighe(iso, {}, "Giornata confermata");
