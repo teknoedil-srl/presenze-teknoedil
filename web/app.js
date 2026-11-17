@@ -125,7 +125,8 @@ function infoGiorno(iso, g = S.giorni[iso] || {}) {
   return {
     gs, festa, std, feriale, chiusura,
     base: std > 0 ? std : 8,
-    presunto: feriale && !chiusura, // tutti presenti di default
+    lavorativo: feriale && !chiusura,
+    presunto: false, // nessuno è presente di default: le presenze si segnano ogni giorno
     festivo: !!festa || gs === 6,     // domenica o festività
   };
 }
@@ -135,8 +136,9 @@ function inForzaDal(op) {
   const c = op && op.creato;
   return c && c.toDate ? isoDi(c.toDate()) : "0000-00-00";
 }
-function daRegistrare(op, iso, info) {
-  return info.presunto && op.attivo !== false && iso <= oggiISO() && iso >= inForzaDal(op);
+// Un giorno lavorativo già passato in cui non è stato registrato nessuno risulta "da registrare"
+function daRegistrare(op, iso, info, righe) {
+  return info.lavorativo && op.attivo !== false && iso <= oggiISO() && iso >= inForzaDal(op) && !Object.keys(righe || {}).length;
 }
 
 function ruoloUfficio() { return S.ruolo === "admin" || S.ruolo === "ufficio"; }
@@ -360,7 +362,7 @@ function vGiorno(el) {
   let pres = 0, ass = 0, parz = 0, daConf = 0;
   for (const op of lista) {
     const r = righe[op.id];
-    if (!r) { if (info.presunto && op.attivo !== false) daConf++; continue; }
+    if (!r) { if (op.attivo !== false) daConf++; continue; }
     const st = statoRiga(r, info).cls;
     if (st === "pres") pres++; else if (st === "ass") ass++; else if (st === "parz") parz++;
   }
@@ -373,7 +375,9 @@ function vGiorno(el) {
   if (info.chiusura) badges.push(`<span class="badge warn">Chiusura aziendale</span>`);
   if (meseChiuso(iso.slice(0, 7))) badges.push(`<span class="badge chiuso">🔒 Mese chiuso</span>`);
   else if (!perm.ok) badges.push(`<span class="badge">👁 ${esc(perm.motivo)}</span>`);
-  if (S.mkLoaded && info.presunto && daConf === 0 && lista.length) badges.push(`<span class="badge ok">✓ Giornata registrata</span>`);
+  const nReg = Object.keys(righe).length;
+  if (S.mkLoaded && nReg) badges.push(`<span class="badge ok">✓ ${nReg} registrati</span>`);
+  else if (S.mkLoaded && info.lavorativo && iso <= oggi) badges.push(`<span class="badge warn">Da compilare</span>`);
 
   let h = navData(titoloData(iso), sotto, "date", iso);
   h += `<div class="badges">${badges.join("")}${iso !== oggi ? `<button class="badge" data-oggi style="border:none">↩ Torna a oggi</button>` : ""}</div>`;
@@ -383,10 +387,10 @@ function vGiorno(el) {
   if (!S.operai.length) {
     h += `<div class="card vuoto-msg">Nessun operaio in anagrafica.${ruoloUfficio() ? `<div class="spacer"></div><button class="btn primary" data-vai="operai">Aggiungi operai</button>` : " L'ufficio deve inserirli."}</div>`;
   } else {
-    if (!info.presunto && !Object.keys(righe).length) {
+    if (!info.lavorativo && !Object.keys(righe).length) {
       h += `<p class="muted small" style="margin:0 2px 10px">${info.chiusura ? "Giornata segnata come chiusura aziendale." : "Giornata non lavorativa."} Se qualcuno ha lavorato (urgenze), tocca il suo nome e registra le ore.</p>`;
     }
-    h += `<div class="contatori"><span>Presenti <b>${pres}</b></span><span>Assenti <b>${ass}</b></span><span>Parziali <b>${parz}</b></span>${daConf ? `<span>Da confermare <b>${daConf}</b></span>` : ""}</div>`;
+    h += `<div class="contatori"><span>Presenti <b>${pres}</b></span><span>Assenti <b>${ass}</b></span><span>Parziali <b>${parz}</b></span>${daConf ? `<span>Non segnati <b>${daConf}</b></span>` : ""}</div>`;
     h += `<div class="lista">`;
     for (const op of lista) {
       const r = righe[op.id];
@@ -404,11 +408,12 @@ function vGiorno(el) {
         <button class="btn small" data-multi>✎ Modifica più operai</button>
         ${ruoloUfficio() && info.feriale ? `<button class="btn small" data-chiusura>${info.chiusura ? "Annulla chiusura aziendale" : "Segna chiusura aziendale"}</button>` : ""}
       </div>`;
-      if (daConf > 0) {
-        h += `<div class="barra-conferma"><button class="btn primary big" data-conferma>✓ Conferma giornata (${daConf} ${daConf === 1 ? "presente" : "presenti"} da registrare)</button></div>`;
+      const nonSegnati = lista.filter((o) => o.attivo !== false && !righe[o.id]).length;
+      if (nonSegnati > 1) {
+        h += `<div style="margin-top:8px"><button class="btn small" data-tutti-pres>☑ Segna presenti tutti i non segnati (${nonSegnati})</button></div>`;
       }
     }
-    h += `<p class="muted small" style="margin-top:14px">☑ casella = presente · tocca il nome per orario, straordinario, causale dell'assenza o nota.${daConf > 0 ? " Le voci tratteggiate sono presenze previste: si salvano al primo tocco o con \"Conferma giornata\"." : ""}</p>`;
+    h += `<p class="muted small" style="margin-top:14px">☑ casella = presente (orario previsto) · tocca il nome per cambiare ore, straordinario, segnare un'assenza con causale o aggiungere una nota.</p>`;
   }
   el.innerHTML = h;
   bindNav(el, "giorno");
@@ -416,18 +421,21 @@ function vGiorno(el) {
     if (!perm.ok) { mostraDettaglio(iso, b.dataset.op); return; }
     apriEditor(iso, [b.dataset.op]);
   }));
-  // Casella presenza: spuntata = presente con l'orario previsto, tolta = assente (causale da specificare toccando il nome)
+  // Casella presenza: spuntata = presente con l'orario previsto, tolta = nessuna presenza (le assenze con causale si segnano dal nome)
   el.querySelectorAll("[data-chk]").forEach((c) => (c.onchange = () => {
     const id = c.dataset.chk;
     const vecchia = righe[id] || {};
     let nr;
     if (c.checked) nr = { ore: info.base, str: 0, oreAss: 0, caus: null, nota: vecchia.nota || "" };
-    else if (info.presunto) nr = { ore: 0, str: 0, oreAss: info.base, caus: "NS", nota: vecchia.nota || "" };
-    else nr = null; // giorno non lavorativo: nessuna registrazione
+    else nr = null; // casella tolta: nessuna presenza registrata
     salvaRighe(iso, { [id]: nr }, c.checked ? "Presente" : "Assente");
   }));
-  const conf = $("[data-conferma]", el);
-  if (conf) conf.onclick = () => salvaRighe(iso, {}, "Giornata confermata");
+  const tp = $("[data-tutti-pres]", el);
+  if (tp) tp.onclick = () => {
+    const ids = lista.filter((o) => o.attivo !== false && !righe[o.id]).map((o) => o.id);
+    if (!confirm(`Segnare presenti ${ids.length} operai (${fmt(info.base)}h)?`)) return;
+    salvaRighe(iso, Object.fromEntries(ids.map((id) => [id, { ore: info.base, str: 0, oreAss: 0, caus: null, nota: "" }])), `${ids.length} presenti`);
+  };
   const multi = $("[data-multi]", el);
   if (multi) multi.onclick = () => apriEditorMulti(iso);
   const ch = $("[data-chiusura]", el);
@@ -668,7 +676,7 @@ function calcolaMese(mk) {
     let manca = false;
     for (const op of operai) {
       const r = righe[op.id];
-      if (!r) { if (daRegistrare(op, iso, info)) manca = true; continue; }
+      if (!r) { if (daRegistrare(op, iso, info, righe)) manca = true; continue; }
       const t = tot[op.id];
       const ore = num(r.ore), str = num(r.str), oa = num(r.oreAss);
       t.ore += ore; t.str += str;
@@ -712,7 +720,7 @@ function vCalendario(el) {
         const r = (g.righe || {})[op.id];
         const st = statoRiga(r, info);
         let cls = "c-" + st.cls.split(" ")[0], txt = st.cod;
-        if (!r && info.presunto) { cls = "c-manca"; txt = daRegistrare(op, iso, info) ? "?" : ""; }
+        if (!r && info.lavorativo) { cls = "c-manca"; txt = daRegistrare(op, iso, info, g.righe) ? "?" : ""; }
         h += `<td class="cell ${cls} ${info.festivo ? "festcol" : ""}" data-iso="${iso}">${esc(txt)}</td>`;
       }
       h += `<td><b>${fmt(tot[op.id].ore)}</b></td><td>${fmt(tot[op.id].str)}</td></tr>`;
@@ -730,7 +738,7 @@ function vCalendario(el) {
       const r = (g.righe || {})[op.id];
       const st = statoRiga(r, info);
       let txt = st.cod, col = "c-" + st.cls.split(" ")[0];
-      if (!r && info.presunto) { txt = daRegistrare(op, iso, info) ? "?" : ""; col = "c-manca"; }
+      if (!r && info.lavorativo) { txt = daRegistrare(op, iso, info, g.righe) ? "?" : ""; col = "c-manca"; }
       h += `<button class="g ${info.festivo ? "fest" : ""} ${iso === oggi ? "oggi" : ""}" data-iso="${iso}" title="${esc(info.festa || "")}">
         <span class="n">${d}</span><span class="v"><span class="${col}" style="color:var(--${col === "c-pres" ? "pres" : col === "c-ass" ? "ass" : col === "c-parz" ? "parz" : "muted"})">${esc(txt)}</span></span>${r && r.nota ? `<span class="small">📝</span>` : ""}</button>`;
     }
@@ -848,7 +856,7 @@ async function esportaExcel(mk, M) {
       const g = S.giorni[iso] || {};
       const info = infoGiorno(iso, g);
       const r = (g.righe || {})[op.id];
-      if (!r) return daRegistrare(op, iso, info) ? "?" : "";
+      if (!r) return daRegistrare(op, iso, info, g.righe) ? "?" : "";
       const st = statoRiga(r, info);
       const v = st.cod === "–" ? "" : st.cod;
       return /^\d+(,\d+)?$/.test(v) ? num(v) : v;
@@ -962,7 +970,7 @@ function vImpostazioni(el) {
     const os = S.imp.oreSett || DEF_IMP.oreSett;
     const fl = S.imp.festivitaLocali || [];
     h += `<div class="sez-titolo">Orario e calendario</div>
-      <div class="card"><b>Ore ordinarie previste per giorno</b><p class="muted small" style="margin:4px 0 8px">0 = giorno non lavorativo (nessuno è presunto presente; si possono comunque registrare ore).</p>
+      <div class="card"><b>Ore ordinarie previste per giorno</b><p class="muted small" style="margin:4px 0 8px">0 = giorno non lavorativo (si possono comunque registrare ore per le urgenze).</p>
         <div class="ore-sett">${GIORNI_BREVI.map((g, i) => `<div>${g}<input data-os="${i}" inputmode="decimal" value="${fmt(os[i])}"></div>`).join("")}</div>
         <button class="btn small primary" data-salva-os style="margin-top:10px">Salva orario</button>
       </div>
