@@ -310,7 +310,8 @@ function renderAvvisi() {
   let h = "";
   if (ruoloUfficio()) {
     const ub = S.imp.ultimoBackup && S.imp.ultimoBackup.toDate ? S.imp.ultimoBackup.toDate() : null;
-    const rif = ub || (S.membri.creato && S.membri.creato.toDate ? S.membri.creato.toDate() : null);
+    const primoOp = S.operai.map((o) => (o.creato && o.creato.toDate ? o.creato.toDate().getTime() : Infinity)).reduce((x, y) => Math.min(x, y), Infinity);
+    const rif = ub || (S.membri.creato && S.membri.creato.toDate ? S.membri.creato.toDate() : null) || (isFinite(primoOp) ? new Date(primoOp) : null);
     const giorni = rif ? (Date.now() - rif.getTime()) / 864e5 : 0;
     if (giorni > 30 && !sessionStorage.getItem("noBackup")) {
       h += `<div class="avviso"><span>💾 ${ub ? "Ultimo backup più di 30 giorni fa." : "Nessun backup scaricato finora."} Il piano gratuito non fa copie automatiche.</span>
